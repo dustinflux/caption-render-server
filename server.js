@@ -77,7 +77,7 @@ app.get("/health", async (req, res) => {
 
   res.json({
     status: "ok",
-    version: "3.3.0",
+    version: "3.4.0",
     ffmpeg: ffmpegVersion,
     codecs,
     uptime: process.uptime(),
@@ -308,24 +308,25 @@ function normalizeVideo(inputPath, outputPath, probe, log) {
 // ============================================================
 // Composite overlay PNG onto normalized video
 //
-// KEY FIX: Do NOT use -loop 1 or -shortest. When FFmpeg receives
-// a single PNG as input #1, it automatically uses it as a still
-// image overlay for the entire duration of input #0. The -loop 1
-// flag creates an INFINITE video stream that confuses the muxer
-// into producing 0-byte output with code null.
+// Uses -loop 1 to repeat the PNG as an infinite image stream,
+// then -t <duration> to cap the output at exactly the video's
+// length. This avoids both:
+//   1. Hanging (no -loop = FFmpeg waits for more PNG frames)
+//   2. 0-byte output (-shortest confuses the muxer)
 //
-// format=yuv420p inside the filter chain strips the alpha channel
-// from the overlay output before libx264 (which can't encode alpha).
+// format=yuv420p in the filter strips alpha before libx264.
 // ============================================================
-function compositeOverlay(videoPath, overlayPath, outputPath, videoWidth, videoHeight, hasAudio, log) {
+function compositeOverlay(videoPath, overlayPath, outputPath, videoWidth, videoHeight, hasAudio, duration, log) {
   return new Promise((resolve, reject) => {
     const filterComplex = "[1:v]scale=" + videoWidth + ":" + videoHeight + "[ovr];[0:v][ovr]overlay=0:0,format=yuv420p";
 
     const args = [
       "-y",
       "-i", videoPath,
+      "-loop", "1",
       "-i", overlayPath,
       "-filter_complex", filterComplex,
+      "-t", String(Math.max(0.5, duration || 30)),  // explicit output duration — no -shortest
       "-c:v", "libx264",
       "-preset", "fast",
       "-crf", "23",
@@ -514,7 +515,7 @@ app.post("/render", async (req, res) => {
       const safeWidth = renderWidth % 2 === 0 ? renderWidth : renderWidth + 1;
       const safeHeight = renderHeight % 2 === 0 ? renderHeight : renderHeight + 1;
 
-      await compositeOverlay(videoForComposite, overlayPath, outputPath, safeWidth, safeHeight, probe.hasAudio, log);
+      await compositeOverlay(videoForComposite, overlayPath, outputPath, safeWidth, safeHeight, probe.hasAudio, probe.duration, log);
     } else {
       await compositeDrawtext(videoForComposite, outputPath, caption, probe.hasAudio, log);
     }
@@ -607,7 +608,7 @@ setInterval(() => {
 app.listen(PORT, "0.0.0.0", () => {
   console.log("");
   console.log("╔═══════════════════════════════════════╗");
-  console.log("║  Caption Render Server v3.3.0         ║");
+  console.log("║  Caption Render Server v3.4.0         ║");
   console.log("║  Port: " + PORT + "                            ║");
   console.log("║                                       ║");
   console.log("║  Supported: MP4, MOV, WebM, MKV, AVI  ║");
