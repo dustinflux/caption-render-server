@@ -77,7 +77,7 @@ app.get("/health", async (req, res) => {
 
   res.json({
     status: "ok",
-    version: "3.0.0",
+    version: "3.1.0",
     ffmpeg: ffmpegVersion,
     codecs,
     uptime: process.uptime(),
@@ -307,37 +307,34 @@ function normalizeVideo(inputPath, outputPath, probe, log) {
 
 // ============================================================
 // Composite overlay PNG onto normalized video
-// At this point input is guaranteed clean H.264/AAC/yuv420p
+// Uses the SIMPLEST possible FFmpeg command — no manual format
+// conversions, no named outputs, just scale + overlay.
 // ============================================================
 function compositeOverlay(videoPath, overlayPath, outputPath, videoWidth, videoHeight, hasAudio, log) {
   return new Promise((resolve, reject) => {
-    const filterComplex = [
-      "[1:v]scale=" + videoWidth + ":" + videoHeight + ":flags=lanczos,format=bgra[ovr]",
-      "[0:v][ovr]overlay=0:0:format=auto,format=yuv420p[out]"
-    ].join(";");
+    // Simplest possible: scale the PNG, overlay it. Let FFmpeg handle all format stuff.
+    const filterComplex = "[1:v]scale=" + videoWidth + ":" + videoHeight + "[ovr];[0:v][ovr]overlay=0:0";
 
     const args = [
       "-y",
       "-i", videoPath,
       "-i", overlayPath,
       "-filter_complex", filterComplex,
-      "-map", "[out]",
-    ];
-
-    if (hasAudio) {
-      args.push("-map", "0:a:0?", "-c:a", "aac", "-b:a", "128k");
-    } else {
-      args.push("-an");
-    }
-
-    args.push(
+      "-pix_fmt", "yuv420p",         // output pixel format (not in filter chain)
       "-c:v", "libx264",
       "-preset", "fast",
       "-crf", "23",
       "-movflags", "+faststart",
-      "-shortest",
-      outputPath
-    );
+      "-max_muxing_queue_size", "4096",  // prevent muxing buffer underrun
+    ];
+
+    if (hasAudio) {
+      args.push("-c:a", "aac", "-b:a", "128k");
+    } else {
+      args.push("-an");
+    }
+
+    args.push(outputPath);
 
     log("  → Compositing overlay at " + videoWidth + "x" + videoHeight);
     const startTime = Date.now();
@@ -606,7 +603,7 @@ setInterval(() => {
 app.listen(PORT, "0.0.0.0", () => {
   console.log("");
   console.log("╔═══════════════════════════════════════╗");
-  console.log("║  Caption Render Server v3.0.0         ║");
+  console.log("║  Caption Render Server v3.1.0         ║");
   console.log("║  Port: " + PORT + "                            ║");
   console.log("║                                       ║");
   console.log("║  Supported: MP4, MOV, WebM, MKV, AVI  ║");
