@@ -77,7 +77,7 @@ app.get("/health", async (req, res) => {
 
   res.json({
     status: "ok",
-    version: "3.1.0",
+    version: "3.2.0",
     ffmpeg: ffmpegVersion,
     codecs,
     uptime: process.uptime(),
@@ -307,25 +307,28 @@ function normalizeVideo(inputPath, outputPath, probe, log) {
 
 // ============================================================
 // Composite overlay PNG onto normalized video
-// Uses the SIMPLEST possible FFmpeg command — no manual format
-// conversions, no named outputs, just scale + overlay.
+// CRITICAL: format=yuv420p MUST be inside the filter chain,
+// NOT as -pix_fmt output flag. The overlay filter outputs
+// yuva420p (alpha), and libx264 can't encode alpha frames.
+// The conversion must happen in the filter before encoding.
 // ============================================================
 function compositeOverlay(videoPath, overlayPath, outputPath, videoWidth, videoHeight, hasAudio, log) {
   return new Promise((resolve, reject) => {
-    // Simplest possible: scale the PNG, overlay it. Let FFmpeg handle all format stuff.
-    const filterComplex = "[1:v]scale=" + videoWidth + ":" + videoHeight + "[ovr];[0:v][ovr]overlay=0:0";
+    // format=yuv420p at the END of the filter chain strips alpha before libx264
+    const filterComplex = "[1:v]scale=" + videoWidth + ":" + videoHeight + "[ovr];[0:v][ovr]overlay=0:0,format=yuv420p";
 
     const args = [
       "-y",
       "-i", videoPath,
+      "-loop", "1",               // treat PNG as looping image (better alpha handling)
       "-i", overlayPath,
       "-filter_complex", filterComplex,
-      "-pix_fmt", "yuv420p",         // output pixel format (not in filter chain)
       "-c:v", "libx264",
       "-preset", "fast",
       "-crf", "23",
       "-movflags", "+faststart",
-      "-max_muxing_queue_size", "4096",  // prevent muxing buffer underrun
+      "-max_muxing_queue_size", "4096",
+      "-shortest",                 // end when the video (shorter stream) ends
     ];
 
     if (hasAudio) {
@@ -603,7 +606,7 @@ setInterval(() => {
 app.listen(PORT, "0.0.0.0", () => {
   console.log("");
   console.log("╔═══════════════════════════════════════╗");
-  console.log("║  Caption Render Server v3.1.0         ║");
+  console.log("║  Caption Render Server v3.2.0         ║");
   console.log("║  Port: " + PORT + "                            ║");
   console.log("║                                       ║");
   console.log("║  Supported: MP4, MOV, WebM, MKV, AVI  ║");
