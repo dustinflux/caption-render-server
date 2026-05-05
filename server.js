@@ -29,7 +29,7 @@ app.use(
 app.use(express.json({ limit: "200mb" }));
 
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", version: "2.0.0", ffmpeg: true, uptime: process.uptime(), features: ["overlay-image", "drawtext", "batch"] });
+  res.json({ status: "ok", version: "2.1.0", ffmpeg: true, uptime: process.uptime(), features: ["overlay-image-rgba", "drawtext", "batch"] });
 });
 
 function downloadFile(url, destPath) {
@@ -66,8 +66,9 @@ function probeVideo(filePath) {
 
 function renderWithOverlayImage(inputPath, overlayPath, outputPath, videoWidth, videoHeight) {
   return new Promise((resolve, reject) => {
-    const filterComplex = `[1:v]scale=${videoWidth}:${videoHeight}[ovr];[0:v][ovr]overlay=0:0`;
-    const args = ["-y", "-i", inputPath, "-i", overlayPath, "-filter_complex", filterComplex, "-c:v", "libx264", "-preset", "fast", "-crf", "23", "-c:a", "copy", "-movflags", "+faststart", "-pix_fmt", "yuv420p", outputPath];
+    // Force overlay PNG to RGBA so alpha compositing works, then convert final output to yuv420p for h264
+    const filterComplex = `[1:v]scale=${videoWidth}:${videoHeight}:flags=lanczos,format=rgba[ovr];[0:v]format=rgba[base];[base][ovr]overlay=0:0,format=yuv420p`;
+    const args = ["-y", "-i", inputPath, "-i", overlayPath, "-filter_complex", filterComplex, "-c:v", "libx264", "-preset", "fast", "-crf", "23", "-c:a", "copy", "-movflags", "+faststart", outputPath];
     console.log("[render] Overlay image mode: " + videoWidth + "x" + videoHeight);
     const startTime = Date.now();
     const proc = spawn("ffmpeg", args);
@@ -184,7 +185,7 @@ setInterval(() => {
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log("\n===================================");
-  console.log("  Caption Render Server v2.0.0");
+  console.log("  Caption Render Server v2.1.0");
   console.log("  Port: " + PORT);
   console.log("  Features: overlay-image, drawtext");
   console.log("===================================\n");
